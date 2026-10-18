@@ -1,0 +1,42 @@
+name: Зодчий на Windows
+# Тот же прогон, что zodchiy-windows.yml в закрытом репо движка: там раннер
+# Windows не стартует из-за оплаты, здесь он бесплатный. Код движка приходит
+# черновиком релиза proba-kod: черновик видят только владельцы репо, токен
+# прогона читает его с правом contents: write. Секретов и живого мозга нет.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: zodchiy-windows
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Код движка из черновика
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download proba-kod -R "$GITHUB_REPOSITORY" -p kod.tar.gz -D "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/kod.tar.gz"
+          ls dvizhok | head -30
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: dvizhok/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+        working-directory: dvizhok
+      - run: pnpm build
+        working-directory: dvizhok
+      - name: Claude Code официальным пакетом
+        run: |
+          npm i -g @anthropic-ai/claude-code
+          claude --version
+      - name: Зодчий на настоящем Windows
+        run: node scripts/zodchiy-windows/proverka.mjs
+        working-directory: dvizhok
