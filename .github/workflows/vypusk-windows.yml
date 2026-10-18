@@ -45,7 +45,9 @@ jobs:
           if ($p.ExitCode -ne 0) { throw ("NSIS exit code " + $p.ExitCode) }
           $app = Join-Path $env:LOCALAPPDATA "Programs\svoy-agent\Svoy Agent.exe"
           if (-not (Test-Path -LiteralPath $app)) { throw "NET EXE PRILOZHENIYA POSLE USTANOVKI" }
-          $versiya = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
+          # В свойствах exe версия Electron (signAndEditExecutable: false); версию
+          # приложения NSIS пишет в запись удаления программы.
+          $versiya = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "Svoy Agent*" } | Select-Object -First 1).DisplayVersion
           "version: " + $versiya
           if (-not $versiya.StartsWith("${{ inputs.versiya }}")) { throw ("VERSIYA NE TA: " + $versiya) }
           $zapusk = Start-Process -FilePath $app -PassThru
