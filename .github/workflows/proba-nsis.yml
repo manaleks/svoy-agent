@@ -1,0 +1,55 @@
+name: Проба NSIS
+# Почему exe падает при установке (System.dll, 0xc0000005) то через раз, то
+# всегда: собираем двумя версиями electron-builder и ставим по многу раз.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        eb: ["25.1.8", "26.15.3"]
+    steps:
+      - name: Код из черновика
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download proba-kod -R "$GITHUB_REPOSITORY" -p kod.tar.gz -D .
+          tar -xzf kod.tar.gz --exclude=dvizhok/packages/stend/stend && rm kod.tar.gz
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Сборка
+        working-directory: dvizhok/prilozhenie
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          if [ "${{ matrix.eb }}" != "25.1.8" ]; then npm i -D --no-audit --no-fund electron-builder@${{ matrix.eb }}; fi
+          npx electron-builder --version
+          npx electron-builder --win nsis --x64 --publish never
+      - name: Ставить много раз
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          [System.Environment]::OSVersion.VersionString
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dvizhok\prilozhenie\dist\svoy-agent-windows-x64.exe"
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP "exe") | Out-Null
+          $temp = Join-Path $env:RUNNER_TEMP "exe\svoy-agent-windows-x64.exe"
+          Copy-Item $dist $temp
+          $ok = 0; $bad = 0
+          for ($i = 1; $i -le 8; $i++) {
+            $exe = if ($i % 2) { $dist } else { $temp }
+            $p = Start-Process -FilePath $exe -ArgumentList "/S" -PassThru -Wait
+            $app = Join-Path $env:LOCALAPPDATA "Programs\svoy-agent\Svoy Agent.exe"
+            $est = Test-Path -LiteralPath $app
+            "try $i from " + $(if ($i % 2) {"dist"} else {"temp"}) + ": code " + $p.ExitCode + " app " + $est
+            if ($p.ExitCode -eq 0 -and $est) { $ok++ } else { $bad++ }
+            $un = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\svoy-agent") -Filter "Uninstall*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($un) { Start-Process -FilePath $un.FullName -ArgumentList "/S" -Wait; Start-Sleep -Seconds 3 }
+          }
+          "ITOG eb ${{ matrix.eb }}: ok $ok bad $bad"
