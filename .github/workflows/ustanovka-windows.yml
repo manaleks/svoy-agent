@@ -1,0 +1,77 @@
+name: Установка в приложении на Windows
+# Приложение «Свой агент» на настоящем Windows: сборка, установка exe и проба
+# пути «согласие → установка» против местного стенда сайта с установщиком-
+# пустышкой (dvizhok/prilozhenie/proverki/windows). Проверяет окно согласия,
+# ход, итоги, остановку, журнал на диске и отчёт в буфере. Код — черновик
+# релиза proba-kod. Файл лежит в репозитории manaleks/svoy-agent
+# (.github/workflows/), копия — в проекте рядом с пробой.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Код из черновика
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download proba-kod -R "$GITHUB_REPOSITORY" -p kod.tar.gz -D .
+          # Путь с буквой диска GNU tar принимает за адрес машины: распаковка из текущей папки.
+          tar -xzf kod.tar.gz --exclude=dvizhok/packages/stend/stend && rm kod.tar.gz
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Тесты приложения на Windows
+        working-directory: dvizhok/prilozhenie
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+      - name: Сборка exe на Windows
+        working-directory: dvizhok/prilozhenie
+        run: npx electron-builder --win nsis --x64 --publish never
+      - name: Установка exe
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:GITHUB_WORKSPACE "dvizhok\prilozhenie\dist\svoy-agent-windows-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "/S" -PassThru -Wait
+          "NSIS exit code " + $p.ExitCode
+          $app = Join-Path $env:LOCALAPPDATA "Programs\svoy-agent\Svoy Agent.exe"
+          if (-not (Test-Path $app)) {
+            # Папка установки зависит от настроек сборщика: ищем exe приложения, а не угадываем.
+            $найден = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^Uninstall" } | Select-Object -First 1
+            if (-not $найден) { throw "НЕТ EXE ПРИЛОЖЕНИЯ ПОСЛЕ УСТАНОВКИ" }
+            $app = $найден.FullName
+          }
+          "app: " + $app
+          "SVOY_EXE=$app" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Playwright в отдельной папке
+        shell: powershell
+        run: |
+          $pw = Join-Path $env:RUNNER_TEMP "pw"
+          New-Item -ItemType Directory -Force -Path $pw | Out-Null
+          Push-Location $pw
+          npm init -y | Out-Null
+          npm install playwright-core@1.49.1 --no-audit --no-fund
+          Pop-Location
+          "PLAYWRIGHT_DIR=$pw" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SNIMKI=" + (Join-Path $env:RUNNER_TEMP "snimki") | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Проба установки в приложении
+        working-directory: dvizhok/prilozhenie
+        run: node proverki/windows/proba.mjs
+      - name: Журнал Windows о падениях
+        if: always()
+        shell: powershell
+        run: |
+          Get-WinEvent -FilterHashtable @{LogName='Application'; Level=1,2; StartTime=(Get-Date).AddMinutes(-30)} -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { "----"; $_.TimeCreated; $_.ProviderName; $_.Message }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snimki-i-zhurnaly  # снимки, копии журналов установки и отчёт из буфера
+          path: ${{ runner.temp }}/snimki
+          if-no-files-found: ignore
