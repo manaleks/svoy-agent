@@ -20,8 +20,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download proba-kod -R "$GITHUB_REPOSITORY" -p kod.tar.gz -D "$RUNNER_TEMP"
-          tar -xzf "$RUNNER_TEMP/kod.tar.gz"
+          gh release download proba-kod -R "$GITHUB_REPOSITORY" -p kod.tar.gz -D .
+          # Путь с буквой диска GNU tar принимает за адрес машины: распаковка из текущей папки.
+          tar -xzf kod.tar.gz && rm kod.tar.gz
           ls dvizhok | head -30
       - uses: pnpm/action-setup@v4
         with:
