@@ -1,0 +1,54 @@
+name: Проба на Windows
+# Живой Windows для приложения «Свой агент»: раннер GitHub windows-latest.
+# Секретов нет: ставится готовый exe из релиза, установщик агента не тянется.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Windows PowerShell 5.1 — версия
+        shell: powershell
+        run: $PSVersionTable.PSVersion.ToString()
+
+      - name: Старый вопрос «есть ли задача» через schtasks падает при Stop
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $upalo = $false
+          try { if (schtasks /query /tn svoy-proba-net 2>$null) { "есть" } else { "нет" } } catch { $upalo = $true; "упало: " + $_.Exception.Message }
+          if (-not $upalo) { throw "ожидали падение старой строки — его нет" }
+          "старая строка падает, как на снимке"
+
+      - name: Новый вопрос через Get-ScheduledTask не падает и видит задачу
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zadacha = "svoy-proba-pult"
+          if (Get-ScheduledTask -TaskName $zadacha -ErrorAction SilentlyContinue) { throw "задачи ещё не должно быть" } else { "нет задачи — завожу" }
+          $deistvie = New-ScheduledTaskAction -Execute "C:\Windows\System32\cmd.exe"
+          $vhod = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+          Register-ScheduledTask -TaskName $zadacha -Action $deistvie -Trigger $vhod -Force -ErrorAction Stop | Out-Null
+          if (Get-ScheduledTask -TaskName $zadacha -ErrorAction SilentlyContinue) { "задача заведена и видна — повторная установка её не тронет" } else { throw "задача не видна" }
+          Unregister-ScheduledTask -TaskName $zadacha -Confirm:$false
+
+      - name: Приложение из релиза ставится и запускается
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:RUNNER_TEMP "svoy-agent-windows-x64.exe"
+          Invoke-WebRequest -Uri "https://github.com/manaleks/svoy-agent/releases/latest/download/svoy-agent-windows-x64.exe" -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList "/S" -PassThru -Wait
+          "установщик NSIS вышел с кодом " + $p.ExitCode
+          $nashli = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^Uninstall" -and $_.DirectoryName -notmatch "resources" } | Select-Object -First 5
+          $nashli | ForEach-Object { $_.FullName }
+          if (-not $nashli) { throw "после установки exe приложения не нашёлся" }
+          $app = Start-Process -FilePath $nashli[0].FullName -PassThru
+          Start-Sleep -Seconds 15
+          $zhiv = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+          if (-not $zhiv) { throw ("приложение закрылось через 15 с, код " + $app.ExitCode) }
+          "приложение живо через 15 с: " + $zhiv.ProcessName
+          Get-Process | Where-Object { $_.Path -like "$env:LOCALAPPDATA\Programs\*" } | Stop-Process -Force
