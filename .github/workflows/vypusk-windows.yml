@@ -1,0 +1,71 @@
+name: Выпуск для Windows
+# exe собирается только на Windows: собранный на маке установщик NSIS падает
+# при запуске в своём System.dll (0xc0000005, поймано 18.10). Прогон собирает
+# exe из кода черновика proba-kod, ставит его, запускает и только живой
+# прикладывает к выпуску v<версия>. Зовёт его vypustit.sh.
+on:
+  workflow_dispatch:
+    inputs:
+      versiya:
+        description: "версия выпуска без v, например 0.1.3"
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: vypusk-windows
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Код из черновика
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download proba-kod -R "$GITHUB_REPOSITORY" -p kod.tar.gz -D .
+          tar -xzf kod.tar.gz --exclude=dvizhok/packages/stend/stend && rm kod.tar.gz
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Тесты и сборка exe
+        working-directory: dvizhok/prilozhenie
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          npm version "${{ inputs.versiya }}" --no-git-tag-version --allow-same-version >/dev/null
+          npx electron-builder --win nsis --x64 --publish never
+      - name: Поставить, запустить, снять
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:GITHUB_WORKSPACE "dvizhok\prilozhenie\dist\svoy-agent-windows-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "/S" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw ("NSIS exit code " + $p.ExitCode) }
+          $app = Join-Path $env:LOCALAPPDATA "Programs\svoy-agent\Svoy Agent.exe"
+          if (-not (Test-Path -LiteralPath $app)) { throw "NET EXE PRILOZHENIYA POSLE USTANOVKI" }
+          $versiya = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
+          "version: " + $versiya
+          if (-not $versiya.StartsWith("${{ inputs.versiya }}")) { throw ("VERSIYA NE TA: " + $versiya) }
+          $zapusk = Start-Process -FilePath $app -PassThru
+          Start-Sleep -Seconds 20
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $ekran = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $ekran.Width, $ekran.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($ekran.Location, [System.Drawing.Point]::Empty, $ekran.Size)
+          $bmp.Save((Join-Path $env:RUNNER_TEMP "snimok.png"))
+          if (-not (Get-Process -Id $zapusk.Id -ErrorAction SilentlyContinue)) { throw "PRILOZHENIE ZAKRYLOS" }
+          "OK: prilozhenie zhivo cherez 20 s"
+          Stop-Process -Id $zapusk.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snimok
+          path: ${{ runner.temp }}/snimok.png
+          if-no-files-found: ignore
+      - name: Приложить к выпуску
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ inputs.versiya }}" dvizhok/prilozhenie/dist/svoy-agent-windows-x64.exe -R "$GITHUB_REPOSITORY" --clobber
