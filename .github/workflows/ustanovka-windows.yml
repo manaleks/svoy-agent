@@ -8,7 +8,8 @@ name: Установка в приложении на Windows
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  # Черновик релиза proba-kod токен прогона видит только с правом записи.
+  contents: write
 jobs:
   windows:
     runs-on: windows-latest
