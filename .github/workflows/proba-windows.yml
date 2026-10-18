@@ -22,6 +22,7 @@ jobs:
           try { if (schtasks /query /tn svoy-proba-net 2>$null) { "est" } else { "net" } } catch { $upalo = $true; "UPALO: " + $_.Exception.Message }
           if (-not $upalo) { throw "OZHIDALI PADENIE STAROY STROKI - EGO NET" }
           "STARAYA STROKA PADAET KAK NA SNIMKE"
+          exit 0
 
       - name: Новый вопрос через Get-ScheduledTask не падает и видит задачу
         shell: powershell
