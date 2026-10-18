@@ -43,10 +43,11 @@ jobs:
           "NSIS exit code " + $p.ExitCode
           $app = Join-Path $env:LOCALAPPDATA "Programs\svoy-agent\Svoy Agent.exe"
           if (-not (Test-Path $app)) {
-            # Папка установки зависит от настроек сборщика: ищем exe приложения, а не угадываем.
-            $найден = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^Uninstall" } | Select-Object -First 1
-            if (-not $найден) { throw "НЕТ EXE ПРИЛОЖЕНИЯ ПОСЛЕ УСТАНОВКИ" }
-            $app = $найден.FullName
+            # The install folder depends on builder settings: find the app exe instead of guessing.
+            # PowerShell 5.1 reads this step as ANSI, so no Cyrillic inside run blocks.
+            $found = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^Uninstall" } | Select-Object -First 1
+            if (-not $found) { throw "NO APP EXE AFTER INSTALL" }
+            $app = $found.FullName
           }
           "app: " + $app
           "SVOY_EXE=$app" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
