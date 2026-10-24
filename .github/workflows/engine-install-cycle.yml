@@ -1,0 +1,178 @@
+name: Engine install lifecycle
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Уникальный закрытый draft с z152-source.tgz
+        required: true
+        type: string
+      source_sha256:
+        description: Ожидаемый SHA-256 исходного артефакта из независимого канала
+        required: true
+        type: string
+      commit:
+        description: Принятый commit исходного артефакта
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: engine-install-cycle-${{ inputs.source_tag }}
+  cancel-in-progress: false
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Закрепить служебный код до запуска исходного архива
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo install -d -m 700 /opt/z152-native-fixture-helpers
+          sudo install -m 500 .github/scripts/install-cycle-linux.py /opt/z152-native-fixture-helpers/install-cycle-linux.py
+      - name: Сохранить проверенный фильтр отчёта до запуска архива
+        id: proof_filter
+        shell: pwsh
+        run: |
+          $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes('.github/scripts/publish-install-proof.mjs'))
+          "code=$encoded" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Получить закрытый исходный артефакт
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          if ($env:SOURCE_TAG -eq 'proba-kod' -or $env:SOURCE_TAG -notmatch '^z152-[a-zA-Z0-9-]+$') { throw 'Нужен отдельный draft z152-*' }
+          $draft = gh release view $env:SOURCE_TAG --repo manaleks/svoy-agent --json isDraft --jq '.isDraft'
+          if ($LASTEXITCODE -ne 0 -or $draft -ne 'true') { throw 'Нужен закрытый draft' }
+          gh release download $env:SOURCE_TAG --repo manaleks/svoy-agent --pattern z152-source.tgz --dir source
+          if ($LASTEXITCODE -ne 0) { throw 'Черновик не получен' }
+      - name: Сверить SHA до распаковки и commit
+        shell: pwsh
+        env:
+          EXPECTED_SHA256: ${{ inputs.source_sha256 }}
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+        run: |
+          if ($env:EXPECTED_SHA256 -cnotmatch '^[a-f0-9]{64}$' -or $env:EXPECTED_COMMIT -cnotmatch '^[a-f0-9]{40}$') { throw 'Неверный ожидаемый SHA' }
+          $actual = (Get-FileHash -Algorithm SHA256 source/z152-source.tgz).Hash.ToLowerInvariant()
+          if ($actual -cne $env:EXPECTED_SHA256) { throw 'SHA исходного артефакта не совпал' }
+          New-Item -ItemType Directory -Path cycle | Out-Null
+          tar -xzf source/z152-source.tgz -C cycle
+          if ($LASTEXITCODE -ne 0) { throw 'Исходный артефакт не распакован' }
+          if ((Get-Content cycle/SOURCE_COMMIT -Raw).Trim() -cne $env:EXPECTED_COMMIT) { throw 'Commit не совпал' }
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: cycle/dvizhok/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Установить нативные зависимости этой ОС
+        working-directory: cycle/dvizhok
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile *> "$env:RUNNER_TEMP/z152-install.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Зависимости не установлены' }
+      - name: Собрать пакеты без перезапуска служб владельца
+        working-directory: cycle/dvizhok
+        shell: pwsh
+        run: |
+          pnpm --filter "./packages/**" run build *> "$env:RUNNER_TEMP/z152-build.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Сборка не прошла' }
+      - name: Подготовить браузер для кадров настоящего пульта
+        run: |
+          python -m pip install playwright pillow
+          python -m playwright install chromium
+      - name: Зависимости браузера Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes acl
+          python -m playwright install-deps chromium
+          python -m pip install --target "$RUNNER_TEMP/z152-playwright-python" playwright
+      - name: Адресные проверки до 30 секунд
+        working-directory: cycle/dvizhok
+        shell: pwsh
+        env:
+          DVIZHOK_SELECTED: '["packages/priyomnaya/tests/engine-session.spec.ts","packages/priyomnaya/tests/install-delta.spec.ts","packages/priyomnaya/tests/vypusk-dvizhka.spec.ts","packages/priyomnaya/tests/install-recovery.spec.ts","packages/priyomnaya/tests/verified-generators.spec.ts"]'
+        run: |
+          pnpm exec vitest run --config vitest.fast.config.ts *> "$env:RUNNER_TEMP/z152-selected-tests.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Адресные проверки не прошли' }
+          node --test scripts/reliz/install-cycle-native.test.mjs ../../.github/scripts/publish-install-proof.test.mjs *> "$env:RUNNER_TEMP/z152-native-tests.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Проверки нативного стенда не прошли' }
+      - name: Подготовить отдельного пользователя Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/install-cycle-linux.test.py
+          sudo /usr/bin/python3 /opt/z152-native-fixture-helpers/install-cycle-linux.py setup \
+            --state /opt/z152-native-fixture-helpers/state.json --job-temp "$RUNNER_TEMP" \
+            --source "$GITHUB_WORKSPACE/cycle" --archive "$GITHUB_WORKSPACE/source/z152-source.tgz" \
+            --node "$(command -v node)" --pnpm "$(command -v pnpm)" --python "$(command -v python)" \
+            --python-libs "$RUNNER_TEMP/z152-playwright-python" \
+            --browsers "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+      - name: Настоящий цикл Linux с пределом 12 минут
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SOURCE_SHA256: ${{ inputs.source_sha256 }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/python3 /opt/z152-native-fixture-helpers/install-cycle-linux.py run \
+            --state /opt/z152-native-fixture-helpers/state.json --sha "$SOURCE_SHA256" --commit "$SOURCE_COMMIT" > "$RUNNER_TEMP/z152-cycle-private.log" 2>&1
+      - name: Удалить отдельного пользователя Linux и забрать доказательства
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/python3 /opt/z152-native-fixture-helpers/install-cycle-linux.py cleanup \
+            --state /opt/z152-native-fixture-helpers/state.json
+      - name: Настоящий цикл с пределом 12 минут
+        if: runner.os != 'Linux'
+        working-directory: cycle/dvizhok
+        env:
+          SOURCE_SHA256: ${{ inputs.source_sha256 }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        shell: pwsh
+        run: |
+          node scripts/reliz/install-cycle.mjs --source-archive ../../source/z152-source.tgz --source-sha256 $env:SOURCE_SHA256 --commit $env:SOURCE_COMMIT --proof ../output/proof *> "$env:RUNNER_TEMP/z152-cycle-private.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Цикл не принят: см. фактический отчёт' }
+      - name: Подготовить публичный отчёт с закрытым составом полей
+        id: public_proof
+        if: always()
+        shell: pwsh
+        env:
+          PROOF_FILTER: ${{ steps.proof_filter.outputs.code }}
+        run: |
+          if (-not $env:PROOF_FILTER) { throw 'Доверенный фильтр не сохранён' }
+          $filter = Join-Path $env:RUNNER_TEMP ([Guid]::NewGuid().ToString('N') + '.mjs')
+          [IO.File]::WriteAllBytes($filter, [Convert]::FromBase64String($env:PROOF_FILTER))
+          New-Item -ItemType Directory -Force cycle/output/proof | Out-Null
+          $proof = Join-Path $env:RUNNER_TEMP ('z152-public-' + [Guid]::NewGuid().ToString('N'))
+          node $filter cycle/output/proof $proof
+          if ($LASTEXITCODE -ne 0) { throw 'Публичный отчёт не прошёл проверку' }
+          "path=$proof" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Сохранить только отчёт и кадры
+        if: always() && steps.public_proof.outputs.path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: z152-proof-${{ matrix.os }}
+          path: |
+            ${{ steps.public_proof.outputs.path }}/*.json
+            ${{ steps.public_proof.outputs.path }}/*.png
+          if-no-files-found: error
+          retention-days: 7
