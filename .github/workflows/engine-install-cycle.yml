@@ -112,6 +112,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Адресные проверки не прошли' }
           node --test scripts/reliz/install-cycle-native.test.mjs ../../.github/scripts/publish-install-proof.test.mjs *> "$env:RUNNER_TEMP/z152-native-tests.log"
           if ($LASTEXITCODE -ne 0) { throw 'Проверки нативного стенда не прошли' }
+      - name: Проверить остановку писателей и восстановление служб
+        working-directory: cycle/dvizhok
+        shell: pwsh
+        run: |
+          $suite = if ($IsWindows) { 'packages/priyomnaya/tests/native-services-windows.contract.ts' } else { 'packages/priyomnaya/tests/native-services.spec.ts' }
+          $env:DVIZHOK_SELECTED = ConvertTo-Json -Compress -InputObject @($suite)
+          pnpm exec vitest run --config vitest.fast.config.ts --testTimeout=30000 --maxWorkers=1 *> "$env:RUNNER_TEMP/z152-service-tests.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Проверка остановки и восстановления служб не прошла' }
       - name: Подготовить отдельного пользователя Linux
         if: runner.os == 'Linux'
         shell: bash
