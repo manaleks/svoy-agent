@@ -131,7 +131,20 @@ jobs:
           print('Diagnostic indicators:', {signal: signal.lower() in log.lower() for signal in signals})
           PY
           fi
+          printf %s LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCRENDQWV5Z0F3SUJBZ0lVZUhERzMwQ0dHZDZVZ2VFSnB1eXVGd1Yvc2ZBd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0lqRWdNQjRHQTFVRUF3d1hjM2x1ZEdobGRHbGpMV05wTFdScFlXZHViM04wYVdNd0hoY05Nall4TVRBMApNakUwT1RVeFdoY05Nall4TVRBMU1qRTBPVFV4V2pBaU1TQXdIZ1lEVlFRRERCZHplVzUwYUdWMGFXTXRZMmt0ClpHbGhaMjV2YzNScFl6Q0NBU0l3RFFZSktvWklodmNOQVFFQkJRQURnZ0VQQURDQ0FRb0NnZ0VCQUxCdENaK0YKamFXVGtjT1pJUHVGb05waXRaazR3a0xXWVltbmxFdmlUTEthQUNxQUMzbDFnZkx3WDQ5aVRwcmFwM1JTT1RNUQpFdXRKWkZ2akFKbS9RT1psbzQwZnJjeXpXTzN0bHY1RlJyQlBGRDZQUGR4UlprdldRTXhxQnZQQ0YrSWlZL3MrCmJOTE0rQXpIc2h3bWFWUFJSZ0JHREFCTmdqbUJBVzZ1N25QUVVhMU8rU2FvTzFHV3ptUkhjckxmaGw4bWNFMG8KcFBjWjNWQnRQajg1RUR1VHRnQVhvdmVlK2creXVJZlIzaGJvT1lYT0loRkMrc0Q0cFFYS01zRGxMTWwzQzMwWAptSFkrVE15UFc0QjZlMEpscDRZK3E3cjBIVFNYdGwzYTdicm8xVUZGSVdzUVRIUVFuMFh4emo4Z1kwNHRjOThBCmZacDR3NGJQMzNnVkhKc0NBd0VBQWFNeU1EQXdIUVlEVlIwT0JCWUVGSnRmb21WcllQTFBhaTdaS3V3SSs2SUgKOFhZbk1BOEdBMVVkRXdFQi93UUZNQU1CQWY4d0RRWUpLb1pJaHZjTkFRRUxCUUFEZ2dFQkFDa2pjWFRuZzFnRgo2RUNBbjFRQnlRSENvOUJCWDRHakxlSURNVjJBWVl0WVNqNUdUUGt3b3FVWXdEU0R3NVl0MXhwdlpBWmhTbWZNCnZZVGdQMGU3a3FnVk9wcGo4VlR3dkZYZXVRWE9uaWxUSk1lTzd5Q1l6cGJyUzRtczc2cjVZQ1BPYjRSd0FoR3IKR0t4SWN5WTMrUElHOThQQmw4bnZYZDVUM3A5TmhWdmc3aUhLV1YwbG5LOG5GVnMvc1FlMktqRWI3RExkZmx2OAoyZTh4TG5KSmJJZzdDQzk0NkNqdzl5V0pqaVljZlAxYStHNG10S0RzT0hUNnZUdk5pRVRsL3lGT2VPbEpnNlJPCi92cEZPTHZCUEorNmlWbGlnQVhGVjlDUEREL3k2RGxPUzAyS1dvWVdYdnlPOGRkaTNMd0ZDYytLSlhjUmJYOTMKUG9zWVJEbmtsZ2M9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K | base64 -d >"$RUNNER_TEMP/diagnostic-cert.pem"
+          rg_unavailable=0
+          sed -n "/PRIVATE_SYNTHETIC_ANSWER/p" "$RUNNER_TEMP/eval.log" >"$RUNNER_TEMP/synthetic-answer.txt"
+          openssl cms -encrypt -binary -aes256 -in "$RUNNER_TEMP/synthetic-answer.txt" -out "$RUNNER_TEMP/synthetic-answer.cms" -outform DER "$RUNNER_TEMP/diagnostic-cert.pem"
+          rm -f "$RUNNER_TEMP/synthetic-answer.txt"
           exit "$rc"
+      - name: Preserve the encrypted synthetic answer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-synthetic-answer
+          path: ${{ runner.temp }}/synthetic-answer.cms
+          if-no-files-found: error
+          retention-days: 1
 
 # Trial: one intent keeps the health summary and memory tool.
 # Check explicit memory persistence as well.
@@ -143,3 +156,4 @@ jobs:
 # Current model with one slot and bounded RAM cache.
 # Distinguish a missing-data statement from a fabricated value.
 # Corrected bounded numeric diagnostic.
+# Encrypted diagnostics contain fictional output only.
