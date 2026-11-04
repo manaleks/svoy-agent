@@ -13,9 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - model: qwen3-4b
-            url: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
-            sha: 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
           - model: qwen35-2b
             url: https://huggingface.co/gguf/Qwen3.5-2B-GGUF/resolve/47f5192dcee31b32db0ba0acc04cccef89cb4b2c/qwen3.5-2b-Q4_K_M.gguf
             sha: 9a3d0aa6c920f096441139b6a254542da855223fdad06855ea00c6c087fd713d
@@ -90,6 +87,16 @@ jobs:
           for kind, seconds in re.findall(r'SYNTHETIC_METRIC (first|subsequent) ([0-9.]+)', log):
               print('Synthetic turn:', kind, 'seconds:', seconds)
           PY
+          python3 - <<'PYMETRIC'
+          import json, os
+          from pathlib import Path
+          journal = Path(os.environ['RUNNER_TEMP']) / 'encrypted-case/gateway-journal'
+          for path in sorted(journal.glob('*.jsonl')):
+              for line in path.read_text().splitlines():
+                  row = json.loads(line)
+                  keys = ('dlit_ms', 'vhod_tok', 'vyhod_tok', 'kesh_tok', 'usage_known', 'cache_known')
+                  print('Synthetic gateway metrics:', {k: row.get(k) for k in keys})
+          PYMETRIC
           if [ "$rc" != 0 ]; then
             python3 - <<'PY'
           import os
