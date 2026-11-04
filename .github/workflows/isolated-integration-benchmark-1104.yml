@@ -13,9 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - model: qwen35-2b
-            url: https://huggingface.co/gguf/Qwen3.5-2B-GGUF/resolve/47f5192dcee31b32db0ba0acc04cccef89cb4b2c/qwen3.5-2b-Q4_K_M.gguf
-            sha: 9a3d0aa6c920f096441139b6a254542da855223fdad06855ea00c6c087fd713d
+          - model: qwen3-4b
+            url: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
+            sha: 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
     steps:
       - name: Fetch a temporary private artifact without displaying it
         env:
@@ -62,7 +62,7 @@ jobs:
             --cap-drop=ALL --security-opt=no-new-privileges --read-only \
             -v "$RUNNER_TEMP/model:/models:ro" -v "$RUNNER_TEMP/model-socket:/socket" \
             ghcr.io/ggml-org/llama.cpp@sha256:d88f41f7675f8b30d7213a917f72a48f05d0549af4d1be7e712ebb130a235415 \
-            -m /models/model.gguf --host /socket/model.sock --ctx-size 8192 --threads 2 --parallel 1 --jinja --poll 0 --no-webui --cache-ram 256 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on >/dev/null
+            -m /models/model.gguf --host /socket/model.sock --ctx-size 8192 --threads 2 --parallel 1 --jinja --poll 0 --no-webui --cache-ram 0 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on >/dev/null
           for ((i=0; i<180; i++)); do
             curl --silent --fail --unix-socket "$RUNNER_TEMP/model-socket/model.sock" http://localhost/health >/dev/null && exit 0
             sleep 1
@@ -161,3 +161,5 @@ jobs:
 # Accept the verified missing-data wording without weakening number checks.
 # Recheck the existing model with the corrected synthetic assertion.
 # Additional synthetic diagnosis, medication, and saturation checks.
+
+# Test the original 4B with a single intent and no cross-slot RAM cache.
