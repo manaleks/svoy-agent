@@ -116,3 +116,5 @@ jobs:
           path: ${{ runner.temp }}/nika-app.cms
           if-no-files-found: error
           retention-days: 1
+
+# Rebuild after tightening the offline response check.
