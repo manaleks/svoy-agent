@@ -117,3 +117,4 @@ jobs:
           exit "$rc"
 
 # Trial: one intent keeps the health summary and memory tool.
+# Check explicit memory persistence as well.
