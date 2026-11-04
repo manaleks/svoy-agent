@@ -115,3 +115,5 @@ jobs:
           PY
           fi
           exit "$rc"
+
+# Trial: one intent keeps the health summary and memory tool.
