@@ -13,6 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - model: qwen3-4b
+            url: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
+            sha: 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
           - model: qwen35-2b
             url: https://huggingface.co/gguf/Qwen3.5-2B-GGUF/resolve/47f5192dcee31b32db0ba0acc04cccef89cb4b2c/qwen3.5-2b-Q4_K_M.gguf
             sha: 9a3d0aa6c920f096441139b6a254542da855223fdad06855ea00c6c087fd713d
@@ -80,6 +83,13 @@ jobs:
             bash dvizhok/services/prilozhenie/hosted-health/galen-private-eval.sh >"$RUNNER_TEMP/eval.log" 2>&1
           rc=$?
           echo "Synthetic integration exit code: $rc; elapsed seconds: $((SECONDS-start))"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          log = (Path(os.environ['RUNNER_TEMP']) / 'eval.log').read_text(errors='replace')
+          for kind, seconds in re.findall(r'SYNTHETIC_METRIC (first|subsequent) ([0-9.]+)', log):
+              print('Synthetic turn:', kind, 'seconds:', seconds)
+          PY
           if [ "$rc" != 0 ]; then
             python3 - <<'PY'
           import os
