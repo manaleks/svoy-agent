@@ -96,6 +96,17 @@ jobs:
                   row = json.loads(line)
                   keys = ('dlit_ms', 'vhod_tok', 'vyhod_tok', 'kesh_tok', 'usage_known', 'cache_known')
                   print('Synthetic gateway metrics:', {k: row.get(k) for k in keys})
+          allowed = called = False
+          for path in journal.glob('polnye/*.json'):
+              entry = json.loads(path.read_text())
+              request = entry.get('zapros') or {}
+              response = entry.get('otvet') or {}
+              allowed |= any((tool.get('function') or {}).get('name') == 'remember' for tool in request.get('tools', []))
+              if isinstance(response, dict):
+                  for choice in response.get('choices', []):
+                      message = choice.get('message') or {}
+                      called |= any((call.get('function') or {}).get('name') == 'remember' for call in message.get('tool_calls', []))
+          print('Synthetic memory tool signals:', {'offered': allowed, 'called': called})
           PYMETRIC
           if [ "$rc" != 0 ]; then
             python3 - <<'PY'
@@ -108,6 +119,9 @@ jobs:
                      'synthetic checks failed', 'timed out', 'No such file or directory', 'ECONNREFUSED',
                      'The isolated profile must expose its web room', 'The isolated profile must not inherit a Telegram owner',
                      'The real health skill did not read the synthetic summary',
+                     'Synthetic health questions unexpectedly modified memory',
+                     'The synthetic memory request was not saved',
+                     'The stored synthetic memory does not contain the requested fact',
                      'The engine did not relay the synthetic value',
                      'The engine did not acknowledge the missing synthetic measurement',
                      'The engine invented a synthetic blood pressure measurement')
