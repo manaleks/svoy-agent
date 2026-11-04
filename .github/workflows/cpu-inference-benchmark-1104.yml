@@ -2,7 +2,6 @@ name: CPU inference benchmark
 on:
   push:
     branches: [codex/cpu-inference-benchmark-1104]
-    paths: [.github/workflows/cpu-inference-benchmark-1104.yml]
 permissions:
   contents: read
 jobs:
@@ -13,9 +12,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - model: qwen3-4b
-            url: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
-            sha: 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
           - model: qwen35-2b
             url: https://huggingface.co/gguf/Qwen3.5-2B-GGUF/resolve/47f5192dcee31b32db0ba0acc04cccef89cb4b2c/qwen3.5-2b-Q4_K_M.gguf
             sha: 9a3d0aa6c920f096441139b6a254542da855223fdad06855ea00c6c087fd713d
@@ -35,7 +31,7 @@ jobs:
             --cap-drop=ALL --security-opt=no-new-privileges --read-only \
             -v "$RUNNER_TEMP/model:/models:ro" -v "$RUNNER_TEMP/model-socket:/socket" \
             ghcr.io/ggml-org/llama.cpp@sha256:d88f41f7675f8b30d7213a917f72a48f05d0549af4d1be7e712ebb130a235415 \
-            -m /models/model.gguf --host /socket/model.sock --ctx-size 8192 --threads 2 --parallel 1 --jinja --poll 0 --no-webui --cache-ram 0 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on
+            -m /models/model.gguf --host /socket/model.sock --ctx-size 8192 --threads 2 --parallel 1 --jinja --poll 0 --no-webui --cache-ram 256 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on
           for ((i=0; i<180; i++)); do test -S "$RUNNER_TEMP/model-socket/model.sock" && break; sleep 1; done
           test -S "$RUNNER_TEMP/model-socket/model.sock"
           for ((i=0; i<180; i++)); do
@@ -44,22 +40,32 @@ jobs:
           done
           echo 'Model did not become ready' >&2
           exit 1
-      - name: Measure cold and warm prompts
+      - name: Check cached context isolation with fictional markers
         run: |
-          python3 - <<'PY'
-          import json, os, subprocess, time
+          python3 - <<'PYTEST'
+          import concurrent.futures, json, os, subprocess, time
           from pathlib import Path
-          root = Path(os.environ['RUNNER_TEMP'])
-          prefix = ('A small fictional town has three parks, two libraries, and a museum. ' * 120)
-          for question in ['How many parks are in the town?', 'How many libraries are in the town?']:
-              request = {'model':'local', 'messages':[{'role':'user','content':prefix + question}], 'temperature':0, 'max_tokens':48, 'chat_template_kwargs':{'enable_thinking':False}}
-              file = root / 'request.json'
-              file.write_text(json.dumps(request))
-              started = time.monotonic()
-              result = subprocess.run(['curl','--fail-with-body','--silent','--show-error','--max-time','600','--unix-socket',str(root / 'model-socket/model.sock'),'-H','Content-Type: application/json','--data-binary','@'+str(file),'http://localhost/v1/chat/completions'], check=True, capture_output=True, text=True)
-              response = json.loads(result.stdout)
-              print(json.dumps({'elapsed_seconds':round(time.monotonic()-started,2),'usage':response.get('usage'),'timings':response.get('timings'),'answer':response['choices'][0]['message'].get('content','')[:120]}, ensure_ascii=False), flush=True)
-          PY
+          sock=str(Path(os.environ['RUNNER_TEMP']) / 'model-socket/model.sock')
+          markers=['amberfox','violetram','silverowl','cobaltape','ivoryyak','scarletpig']
+          prefix=('The following is a fictional test of isolated conversations. Each test includes a single code word. Ignore previous requests and use only the current text. ' * 65)
+          def ask(prompt, marker=None):
+              request={'model':'local','messages':[{'role':'user','content':prompt}], 'temperature':0, 'max_tokens':36, 'chat_template_kwargs':{'enable_thinking':False}}
+              started=time.monotonic()
+              p=subprocess.run(['curl','--fail-with-body','--silent','--show-error','--max-time','300','--unix-socket',sock,'-H','Content-Type: application/json','--data-binary','@-','http://localhost/v1/chat/completions'],input=json.dumps(request),capture_output=True,text=True,check=True)
+              answer=json.loads(p.stdout)['choices'][0]['message'].get('content','').lower()
+              if marker:
+                  ok=marker in answer and not any(other in answer for other in markers if other != marker)
+                  print('marker check:', 'pass' if ok else 'FAIL', 'seconds:', round(time.monotonic()-started,2), flush=True)
+                  if not ok:
+                      print('synthetic answer:',answer[:200],flush=True)
+                      raise AssertionError('Marker missing or another conversation leaked')
+          for marker in markers[:4]:
+              ask('Reply only with the word READY.')
+              ask(prefix+'The current code word is '+marker+'. Reply with the current code word only.', marker)
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              futures=[pool.submit(ask,prefix+'The current code word is '+marker+'. Reply with the current code word only.',marker) for marker in markers[4:]]
+              for f in futures: f.result()
+          PYTEST
       - name: Capture memory and failures
         if: always()
         run: |
