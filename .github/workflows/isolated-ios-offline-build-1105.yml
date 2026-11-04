@@ -1,0 +1,84 @@
+name: Isolated offline iPhone build
+on:
+  push:
+    branches: [codex/cpu-inference-benchmark-1104]
+    paths: [.github/workflows/isolated-ios-offline-build-1105.yml]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - name: Receive private source without displaying it
+        env:
+          CI_OFFLINE_IOS_TEMP_01: ${{ secrets.CI_OFFLINE_IOS_TEMP_01 }}
+          CI_OFFLINE_IOS_TEMP_02: ${{ secrets.CI_OFFLINE_IOS_TEMP_02 }}
+          CI_OFFLINE_IOS_TEMP_03: ${{ secrets.CI_OFFLINE_IOS_TEMP_03 }}
+          CI_OFFLINE_IOS_TEMP_04: ${{ secrets.CI_OFFLINE_IOS_TEMP_04 }}
+          CI_OFFLINE_IOS_TEMP_05: ${{ secrets.CI_OFFLINE_IOS_TEMP_05 }}
+          CI_OFFLINE_IOS_TEMP_06: ${{ secrets.CI_OFFLINE_IOS_TEMP_06 }}
+          CI_OFFLINE_IOS_TEMP_07: ${{ secrets.CI_OFFLINE_IOS_TEMP_07 }}
+          CI_OFFLINE_IOS_TEMP_08: ${{ secrets.CI_OFFLINE_IOS_TEMP_08 }}
+        run: |
+          python3 - <<'PYCODE'
+          import base64, io, os, pathlib, zipfile
+          names = ['CI_OFFLINE_IOS_TEMP_01', 'CI_OFFLINE_IOS_TEMP_02', 'CI_OFFLINE_IOS_TEMP_03', 'CI_OFFLINE_IOS_TEMP_04', 'CI_OFFLINE_IOS_TEMP_05', 'CI_OFFLINE_IOS_TEMP_06', 'CI_OFFLINE_IOS_TEMP_07', 'CI_OFFLINE_IOS_TEMP_08']
+          data = base64.b64decode(''.join(os.environ[n] for n in names), validate=True)
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ios-source'
+          root.mkdir(mode=0o700)
+          with zipfile.ZipFile(io.BytesIO(data)) as archive:
+              for item in archive.infolist():
+                  path = pathlib.PurePosixPath(item.filename)
+                  if path.is_absolute() or '..' in path.parts or item.is_dir():
+                      raise ValueError('Invalid source archive path')
+              archive.extractall(root)
+          PYCODE
+      - name: Prepare project
+        working-directory: ${{ runner.temp }}/ios-source
+        run: |
+          brew install xcodegen
+          touch Secrets.xcconfig
+          xcodegen generate
+      - name: Test on iOS simulator
+        working-directory: ${{ runner.temp }}/ios-source
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for devices in data["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
+          xcodebuild test -skipMacroValidation -project Nika.xcodeproj -scheme Nika -destination "platform=iOS Simulator,id=$DEVICE_ID" CODE_SIGNING_ALLOWED=NO >"$RUNNER_TEMP/ios-test.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/ios-test.log"; exit 1; }
+          echo 'iOS simulator tests passed.'
+      - name: Build for iPhone
+        working-directory: ${{ runner.temp }}/ios-source
+        run: |
+          xcodebuild build -skipMacroValidation -project Nika.xcodeproj -scheme Nika -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/phone-build" CODE_SIGNING_ALLOWED=NO >"$RUNNER_TEMP/ios-build.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/ios-build.log"; exit 1; }
+          echo 'Unsigned device build succeeded.'
+      - name: Encrypt private app artifact
+        run: |
+          cat > "$RUNNER_TEMP/public.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIDBDCCAeygAwIBAgIUeHDG30CGGd6UgeEJpuyuFwV/sfAwDQYJKoZIhvcNAQEL
+          BQAwIjEgMB4GA1UEAwwXc3ludGhldGljLWNpLWRpYWdub3N0aWMwHhcNMjYxMTA0
+          MjE0OTUxWhcNMjYxMTA1MjE0OTUxWjAiMSAwHgYDVQQDDBdzeW50aGV0aWMtY2kt
+          ZGlhZ25vc3RpYzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALBtCZ+F
+          jaWTkcOZIPuFoNpitZk4wkLWYYmnlEviTLKaACqAC3l1gfLwX49iTprap3RSOTMQ
+          EutJZFvjAJm/QOZlo40frcyzWO3tlv5FRrBPFD6PPdxRZkvWQMxqBvPCF+IiY/s+
+          bNLM+AzHshwmaVPRRgBGDABNgjmBAW6u7nPQUa1O+SaoO1GWzmRHcrLfhl8mcE0o
+          pPcZ3VBtPj85EDuTtgAXovee+g+yuIfR3hboOYXOIhFC+sD4pQXKMsDlLMl3C30X
+          mHY+TMyPW4B6e0Jlp4Y+q7r0HTSXtl3a7bro1UFFIWsQTHQQn0Xxzj8gY04tc98A
+          fZp4w4bP33gVHJsCAwEAAaMyMDAwHQYDVR0OBBYEFJtfomVrYPLPai7ZKuwI+6IH
+          8XYnMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBACkjcXTng1gF
+          6ECAn1QByQHCo9BBX4GjLeIDMV2AYYtYSj5GTPkwoqUYwDSDw5Yt1xpvZAZhSmfM
+          vYTgP0e7kqgVOppj8VTwvFXeuQXOnilTJMeO7yCYzpbrS4ms76r5YCPOb4RwAhGr
+          GKxIcyY3+PIG98PBl8nvXd5T3p9NhVvg7iHKWV0lnK8nFVs/sQe2KjEb7DLdflv8
+          2e8xLnJJbIg7CC946Cjw9yWJjiYcfP1a+G4mtKDsOHT6vTvNiETl/yFOeOlJg6RO
+          /vpFOLvBPJ+6iVligAXFV9CPDD/y6DlOS02KWoYWXvyO8ddi3LwFCc+KJXcRbX93
+          PosYRDnklgc=
+          -----END CERTIFICATE-----
+          CERT
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/phone-build/Build/Products/Debug-iphoneos/Nika.app" "$RUNNER_TEMP/nika.zip"
+          openssl cms -encrypt -binary -aes-256-cbc -in "$RUNNER_TEMP/nika.zip" -out "$RUNNER_TEMP/nika-app.cms" -outform DER "$RUNNER_TEMP/public.pem"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-nika-iphone-offline
+          path: ${{ runner.temp }}/nika-app.cms
+          if-no-files-found: error
+          retention-days: 1
