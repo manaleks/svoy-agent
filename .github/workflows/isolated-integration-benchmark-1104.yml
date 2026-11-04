@@ -157,3 +157,4 @@ jobs:
 # Distinguish a missing-data statement from a fabricated value.
 # Corrected bounded numeric diagnostic.
 # Encrypted diagnostics contain fictional output only.
+# Accept the verified missing-data wording without weakening number checks.
