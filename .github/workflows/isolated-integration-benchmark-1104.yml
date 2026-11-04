@@ -1,0 +1,85 @@
+name: Isolated integration benchmark
+on:
+  push:
+    branches: [codex/cpu-inference-benchmark-1104]
+    paths: [.github/workflows/isolated-integration-benchmark-1104.yml]
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: qwen3-4b
+            url: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
+            sha: 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
+          - model: qwen35-2b
+            url: https://huggingface.co/gguf/Qwen3.5-2B-GGUF/resolve/47f5192dcee31b32db0ba0acc04cccef89cb4b2c/qwen3.5-2b-Q4_K_M.gguf
+            sha: 9a3d0aa6c920f096441139b6a254542da855223fdad06855ea00c6c087fd713d
+    steps:
+      - name: Fetch a temporary private artifact without displaying it
+        env:
+          CI_ARTIFACT_URL: ${{ secrets.CI_ARTIFACT_TEMP_1104 }}
+          CI_PRIVATE_TEST: ${{ secrets.CI_TEST_TEMP_1104 }}
+        run: |
+          set -euo pipefail
+          test -n "$CI_ARTIFACT_URL" && test -n "$CI_PRIVATE_TEST"
+          curl -fsSL --max-time 300 "$CI_ARTIFACT_URL" -o "$RUNNER_TEMP/artifact.zip" 2>"$RUNNER_TEMP/download.log" || { echo 'Artifact fetch failed'; exit 1; }
+          echo '0ac49e50760c13ffae652b2a7f3ff0aab3525134de47c922cbacc51c12228981  '"$RUNNER_TEMP/artifact.zip" | sha256sum -c >/dev/null
+          mkdir -p "$RUNNER_TEMP/repo"
+          unzip -q "$RUNNER_TEMP/artifact.zip" -d "$RUNNER_TEMP/bundle"
+          tar -xzf "$RUNNER_TEMP/bundle/galen-engine.tar.gz" -C "$RUNNER_TEMP/repo"
+          printf '%s' "$CI_PRIVATE_TEST" > "$RUNNER_TEMP/repo/dvizhok/services/prilozhenie/hosted-health/galen-engine-eval.mjs"
+          echo 'Private artifact integrity verified.'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Prepare an isolated profile with fictional data
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --break-system-packages pyyaml >"$RUNNER_TEMP/setup.log" 2>&1
+          cd "$RUNNER_TEMP/repo"
+          mkdir -m 700 "$RUNNER_TEMP/encrypted-case"
+          python3 dvizhok/services/prilozhenie/hosted-health/galen-profile.py \
+            --source dvizhok/agents/zdorovie --destination "$RUNNER_TEMP/encrypted-case/agents/zdorovie" \
+            --engine "$RUNNER_TEMP/repo/dvizhok" --health-code "$RUNNER_TEMP/health-code" \
+            --case "$RUNNER_TEMP/encrypted-case" --python /usr/bin/python3 --gateway-port 18081 --web-port 18084 >>"$RUNNER_TEMP/setup.log" 2>&1 || { echo 'Profile setup failed'; exit 1; }
+          DVIZHOK_AGENTS="$RUNNER_TEMP/encrypted-case/agents" node dvizhok/packages/sborka/lib/cli.js build zdorovie >>"$RUNNER_TEMP/setup.log" 2>&1 || { echo 'Profile build failed'; exit 1; }
+          echo 'Disposable profile created.'
+      - name: Download public model
+        env:
+          MODEL_URL: ${{ matrix.url }}
+          MODEL_SHA: ${{ matrix.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/model" "$RUNNER_TEMP/model-socket"
+          curl -fsSL --retry 2 --max-time 600 "$MODEL_URL" -o "$RUNNER_TEMP/model/model.gguf"
+          echo "$MODEL_SHA  $RUNNER_TEMP/model/model.gguf" | sha256sum -c
+      - name: Run isolated model with two CPU cores
+        run: |
+          docker run -d --name cpu-model --network none --user "$(id -u):$(id -g)" \
+            --cpus=2 --memory=3584m --memory-swap=3584m --pids-limit=128 \
+            --cap-drop=ALL --security-opt=no-new-privileges --read-only \
+            -v "$RUNNER_TEMP/model:/models:ro" -v "$RUNNER_TEMP/model-socket:/socket" \
+            ghcr.io/ggml-org/llama.cpp@sha256:d88f41f7675f8b30d7213a917f72a48f05d0549af4d1be7e712ebb130a235415 \
+            -m /models/model.gguf --host /socket/model.sock --ctx-size 8192 --threads 2 --parallel 1 --jinja --poll 0 --no-webui --cache-ram 0 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on >/dev/null
+          for ((i=0; i<180; i++)); do
+            curl --silent --fail --unix-socket "$RUNNER_TEMP/model-socket/model.sock" http://localhost/health >/dev/null && exit 0
+            sleep 1
+          done
+          echo 'Model did not become ready' >&2
+          exit 1
+      - name: Test the isolated integration against fictional data
+        run: |
+          set +e
+          cd "$RUNNER_TEMP/repo"
+          start=$SECONDS
+          sudo systemd-run --wait --pipe --collect --uid="$(id -u)" --gid="$(id -g)" \
+            --property=PrivateNetwork=yes --property="WorkingDirectory=$RUNNER_TEMP/repo" \
+            --setenv="RUNNER_TEMP=$RUNNER_TEMP" --setenv="PATH=$PATH" \
+            bash dvizhok/services/prilozhenie/hosted-health/galen-private-eval.sh >"$RUNNER_TEMP/eval.log" 2>&1
+          rc=$?
+          echo "Synthetic integration exit code: $rc; elapsed seconds: $((SECONDS-start))"
+          exit "$rc"

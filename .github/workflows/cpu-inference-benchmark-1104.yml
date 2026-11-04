@@ -2,6 +2,7 @@ name: CPU inference benchmark
 on:
   push:
     branches: [codex/cpu-inference-benchmark-1104]
+    paths: [.github/workflows/cpu-inference-benchmark-1104.yml]
 permissions:
   contents: read
 jobs:
