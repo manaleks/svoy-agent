@@ -164,4 +164,4 @@ jobs:
 
 # Test the original 4B with a single intent and no cross-slot RAM cache.
 
-# Include the verified missing-data wording in this run.
+# Compare the unchanged two-intent profile on expanded synthetic questions.
