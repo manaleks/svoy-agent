@@ -62,7 +62,7 @@ jobs:
             --cap-drop=ALL --security-opt=no-new-privileges --read-only \
             -v "$RUNNER_TEMP/model:/models:ro" -v "$RUNNER_TEMP/model-socket:/socket" \
             ghcr.io/ggml-org/llama.cpp@sha256:d88f41f7675f8b30d7213a917f72a48f05d0549af4d1be7e712ebb130a235415 \
-            -m /models/model.gguf --host /socket/model.sock --ctx-size 8192 --threads 2 --parallel 1 --jinja --poll 0 --no-webui --cache-ram 0 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on >/dev/null
+            -m /models/model.gguf --host /socket/model.sock --ctx-size 16384 --threads 2 --parallel 2 --jinja --poll 0 --no-webui --cache-ram 0 --ubatch-size 128 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on >/dev/null
           for ((i=0; i<180; i++)); do
             curl --silent --fail --unix-socket "$RUNNER_TEMP/model-socket/model.sock" http://localhost/health >/dev/null && exit 0
             sleep 1
@@ -135,3 +135,4 @@ jobs:
 # Trial: one intent keeps the health summary and memory tool.
 # Check explicit memory persistence as well.
 # Compare memory behavior with the two-intent baseline.
+# Preserve both prompts in separate slots; retain 8192 context per slot.
