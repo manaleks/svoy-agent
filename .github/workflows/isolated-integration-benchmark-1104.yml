@@ -29,7 +29,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/repo"
           unzip -q "$RUNNER_TEMP/artifact.zip" -d "$RUNNER_TEMP/bundle"
           tar -xzf "$RUNNER_TEMP/bundle/galen-engine.tar.gz" -C "$RUNNER_TEMP/repo"
-          printf '%s' "$CI_PRIVATE_TEST" > "$RUNNER_TEMP/repo/dvizhok/services/prilozhenie/hosted-health/galen-engine-eval.mjs"
+          printf '%s' "$CI_PRIVATE_TEST" | base64 -d > "$RUNNER_TEMP/repo/dvizhok/services/prilozhenie/hosted-health/galen-engine-eval.mjs"
           echo 'Private artifact integrity verified.'
       - uses: actions/setup-node@v4
         with:
@@ -87,7 +87,12 @@ jobs:
           log = '\n'.join(p.read_text(errors='replace') for p in (root/'eval.log', root/'gateway.log') if p.exists())
           signals = ('ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ModuleNotFoundError', 'FileNotFoundError',
                      'Permission denied', 'Traceback', 'AssertionError', 'gateway exited before starting',
-                     'synthetic checks failed', 'timed out', 'No such file or directory', 'ECONNREFUSED')
+                     'synthetic checks failed', 'timed out', 'No such file or directory', 'ECONNREFUSED',
+                     'The isolated profile must expose its web room', 'The isolated profile must not inherit a Telegram owner',
+                     'The real health skill did not read the synthetic summary',
+                     'The engine did not relay the synthetic value',
+                     'The engine did not acknowledge the missing synthetic measurement',
+                     'The engine invented a synthetic blood pressure measurement')
           print('Diagnostic indicators:', {signal: signal.lower() in log.lower() for signal in signals})
           PY
           fi
