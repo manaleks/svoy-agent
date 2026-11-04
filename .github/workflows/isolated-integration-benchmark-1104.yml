@@ -165,3 +165,5 @@ jobs:
 # Test the original 4B with a single intent and no cross-slot RAM cache.
 
 # Compare the unchanged two-intent profile on expanded synthetic questions.
+
+# Run a focused diagnosis comparison on the unchanged profile.
