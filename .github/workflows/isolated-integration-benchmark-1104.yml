@@ -29,7 +29,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/repo"
           unzip -q "$RUNNER_TEMP/artifact.zip" -d "$RUNNER_TEMP/bundle"
           tar -xzf "$RUNNER_TEMP/bundle/galen-engine.tar.gz" -C "$RUNNER_TEMP/repo"
-          printf '%s' "$CI_PRIVATE_TEST" | base64 -d > "$RUNNER_TEMP/repo/dvizhok/services/prilozhenie/hosted-health/galen-engine-eval.mjs"
+          printf '%s' "$CI_PRIVATE_TEST" | base64 -d > "$RUNNER_TEMP/overlay.zip"
+          unzip -qo "$RUNNER_TEMP/overlay.zip" -d "$RUNNER_TEMP/repo"
           echo 'Private artifact integrity verified.'
       - uses: actions/setup-node@v4
         with:
