@@ -142,3 +142,4 @@ jobs:
 # Check if a prior fictional memory contaminates the next answer.
 # Current model with one slot and bounded RAM cache.
 # Distinguish a missing-data statement from a fabricated value.
+# Corrected bounded numeric diagnostic.
